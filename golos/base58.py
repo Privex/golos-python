@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+"""
+Contains :class:`.Base58` and various helper functions for working with Base58 public/private keys used on
+blockchains such as GOLOS and STEEM.
+"""
 import hashlib
 import logging
 import string
@@ -6,22 +10,25 @@ from binascii import hexlify, unhexlify
 
 log = logging.getLogger(__name__)
 
-""" Default Prefix """
+
 PREFIX = "GLS"
+""" Default Prefix """
 
 known_prefixes = [
     PREFIX,
     "STM",
     "TST",
 ]
+"""
+A list of known public key prefixes, used by :class:`.Base58` for alerting the user if an invalid prefix may have 
+been used.
+"""
 
 
 class Base58(object):
-    """Base58 base class
-
-    This class serves as an abstraction layer to deal with base58 encoded
-    strings and their corresponding hex and binary representation
-    throughout the library.
+    """
+    **Base58 base class.** This class serves as an abstraction layer to deal with base58 encoded
+    strings and their corresponding hex and binary representation throughout the library.
 
     :param data: Data to initialize object, e.g. pubkey data, address data,
     ...

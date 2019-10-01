@@ -49,3 +49,8 @@ class GolosException(Exception):
 class APINotFound(GolosException):
     """Raised when an RPC node does not support the requested API"""
     pass
+
+
+class RetriesExceeded(GolosException):
+    """Raised when a function has exceeded it's maximum retries and refuses to continue"""
+    pass

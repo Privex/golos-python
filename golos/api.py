@@ -1,4 +1,7 @@
 """
+This is the main module for the GOLOS library, containing the class :class:`.Api` which is the high-level class
+to be used when interacting with python-golos.
+
 Copyright::
 
     +===================================================+
@@ -46,7 +49,7 @@ from datetime import datetime
 from decimal import Decimal
 from pprint import pprint
 from time import time
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Dict
 
 from .broadcast import Tx
 from .key import Key
@@ -57,14 +60,81 @@ log = logging.getLogger(__name__)
 
 
 Number = Union[Decimal, float, int, str]
+"""
+``Number`` is a shorthand type alias to represent numbers in various types - which can be 
+either ``Decimal``, ``float``, ``int``, or ``str``
+"""
 
 DEFAULT_ASSET = 'GOLOS'
+"""
+The primary asset symbol of the current blockchain. Used as the default ``asset`` for some operations if not specified,
+while also obligatory for power up transactions to avoid user error. 
+"""
 
 
 class Api:
+    """
+    Main class for ``golos-python`` - wraps :class:`.ws_client` and provides many helper methods for interacting
+    with the GOLOS blockchain, such as :py:meth:`.get_accounts` and :py:meth:`.transfer`
+    
+    **Official Repo:** https://github.com/Privex/golos-python
 
-    def __init__(self, nodes=None, **kwargs):
+    **Official PyPi Package Name:** ``golos-python``
+    
+    **Basic Usage:**
 
+        >>> from golos import Api
+        >>> golos = Api()
+        >>> acc = golos.get_accounts(['someguy123'])
+        >>> acc[0]['owner']
+        'someguy123'
+        >>> wit = golos.get_witness_by_account('someguy123')
+        >>> wit['url']
+        'https://golos.io/ru--delegaty/@someguy123/delegat-someguy123'
+    
+    
+    """
+    
+    rpc: WsClient
+    key: Key
+    broadcast: Tx
+    asset_precision: Dict[str, int]
+    STEEMIT_BANDWIDTH_PRECISION: int
+    
+    def __init__(self, nodes: Union[List[str], str] = None, **kwargs):
+        """
+        Constructor for Privex's GOLOS wrapper class. No arguments are required, unless you want to override defaults.
+
+        **Basic Usage:**
+
+        Use default nodes list and settings:
+
+            >>> golos = Api()
+
+        Use only this specific node:
+
+            >>> golos = Api(nodes='wss://golosd.privex.io')
+
+        Use a list of nodes, and enable more verbose logging from :class:`.WsClient`
+
+            >>> nodes = ['wss://golosd.privex.io', 'wss://api.golos.blckchnd.com/ws']
+            >>> golos = Api(nodes=nodes, report=True)
+
+        Making basic API calls:
+
+            >>> acc = golos.get_accounts(['someguy123'])
+            >>> acc[0]['owner']
+            'someguy123'
+            >>> wit = golos.get_witness_by_account('someguy123')
+            >>> wit['url']
+            'https://golos.io/ru--delegaty/@someguy123/delegat-someguy123'
+
+
+        :param list|str nodes: A list / singular ``str`` GOLOS node(s) formatted like such: ``wss://golosd.privex.io``
+        :param bool report: (**KWARG**) If ``True`` - enables more verbose logging from :class:`.WsClient`
+        :param kwargs: Any additional keyword arguments (will be forwarded to :class:`.WsClient`'s constructor)
+
+        """
         log.debug('connect b4 GOLOS')
         # Пользуемся своими нодами или новыми
         if nodes:
@@ -251,6 +321,13 @@ class Api:
         Note: If ``memo`` is not present in the ``**kwargs``, it will be excluded from the operation dict
               (this is intentional, to allow for operations such as vesting which do not use memos).
 
+        :param str to: The username of the account to send coins to
+        :param Decimal amount: The amount of coins to send, as either a ``Decimal``, ``str``, ``int`` or ``float``
+        :param str from_account: The username of the account to send from
+        :param str asset: The asset (coin) to send (Default: ``GOLOS`` (value of ``DEFAULT_ASSET``))
+        :param str memo: An optional public message to attach to the transfer (Not included in op if not specified)
+
+        :return dict op: An operation as a dict: ``dict(from:str, to:str, amount:str, memo:str?)``
         """
         op = {
             "from": from_account,
@@ -263,7 +340,40 @@ class Api:
             op['memo'] = kwargs['memo']
         return op
 
-    def transfer(self, to: str, amount: Number, asset: str, from_account: str, wif: str, memo='', **kwargs):
+    def transfer(self, to: str, amount: Number, from_account: str, wif: str, asset=DEFAULT_ASSET, memo='', **kwargs):
+        """
+        Transfer ``amount`` coins (of ``asset``) to ``from_account`` using the private key ``wif`` and the memo ``memo``
+
+        **Basic usage:**
+
+            >>> g = Api()
+            >>> tf = golos.transfer(
+            ...     to='ksantoprotein', amount='0.1', asset='GOLOS', from_account='someguy123',
+            ...     wif='5Jq19TeeVmGrBFnu32oxfxQMiipnSCKmwW7fZGUVLAoqsKJ9JwP', memo='this is an example transfer'
+            ... )
+            >>> print('TXID:', tf['id'], 'Block:', tf['block_num'])
+            TXID: c901c52daf57b60242d9d7be67f790e023cf2780 Block: 30895436
+
+
+        :param str to: The username of the account you want to send coins to
+        :param Decimal amount: The amount of coins to send, as either a ``Decimal``, ``str``, ``int`` or ``float``
+        :param str from_account: The username of the account to send from
+        :param str wif: The active/owner private key for the ``from_account``, as a string in WIF format
+        :param str asset: The asset (coin) to send (Default: ``GOLOS`` (value of ``DEFAULT_ASSET``))
+        :param str memo: An optional public message to attach to the transfer (Default: ``''`` - empty string)
+        :param kwargs: Any additional keyword arguments
+        :return dict transfer: A dictionary containing info about the completed transfer, inc. ``id`` (full ret below)
+
+        **Return data**::
+
+            dict(
+                ref_block_num: int, ref_block_prefix:int,
+                expiration:str, operations:list, extensions:list,
+                signatures:List[str], block_num:int, id:str
+            )
+
+
+        """
         # to, amount, asset, from_account, [memo]
 
         ops = []
@@ -272,8 +382,33 @@ class Api:
         tx = self.finalizeOp(ops, wif)
         return tx
 
-    def transfers(self, raw_ops: Tuple[str, Number, str, str], from_account: str, wif: str):
-        # to, amount, asset, memo
+    def transfers(self, raw_ops: List[Tuple[str, Number, str, str]], from_account: str, wif: str):
+        """
+        Execute multiple transfers in a single transaction.
+
+            >>> tfrs = [('john', '1.234', 'GOLOS', 'thanks man'), ('dave', '0.374', 'GBG', 'hi dave'), ]
+            >>> g = Api()
+            >>> tf = g.transfers(raw_ops=tfrs, from_account='someguy123',
+            ...                  wif='5Jq19TeeVmGrBFnu32oxfxQMiipnSCKmwW7fZGUVLAoqsKJ9JwP')
+            >>> print('TXID:', tf['id'], 'Block:', tf['block_num'])
+            TXID: c901c52daf57b60242d9d7be67f790e023cf2780 Block: 30895436
+
+
+        :param List[Tuple] raw_ops: A list of transfers as 4 key tuples: ``(to:str, amount:str, asset:str, memo:str)``
+        :param str from_account: The username of the account to send from
+        :param str wif: The active/owner private key for the ``from_account``, as a string in WIF format
+
+        :return dict transfer: A dictionary containing info about the completed TX, inc. ``id`` (full ret below)
+
+        **Return data**::
+
+            dict(
+                ref_block_num: int, ref_block_prefix:int,
+                expiration:str, operations:list, extensions:list,
+                signatures:List[str], block_num:int, id:str
+            )
+
+        """
         ops = []
         for raw in raw_ops:
             to, amount, asset, memo = raw
@@ -284,6 +419,36 @@ class Api:
         return tx
 
     def transfer_to_vesting(self, to: str, amount: Number, from_account: str, wif: str, **kwargs):
+        """
+        Power up a given amount of ``DEFAULT_ASSET`` (default: ``GOLOS``) from ``from_account`` into ``to``.
+
+
+        **Basic Usage** (Convert 1000 GOLOS from ``someguy123`` into GESTS to ``someguy123``)
+
+            >>> g = Api()
+            >>> tf = g.transfer_to_vesting(
+            ...   to='someguy123', from_account='someguy123', wif='5Jq19TeeVmGrBFnu32oxfxQMiipnSCKmwW7fZGUVLAoqsKJ9JwP'
+            ...   amount='1000'
+            ... )
+            >>> print('TXID:', tf['id'], 'Block:', tf['block_num'])
+            TXID: c901c52daf57b60242d9d7be67f790e023cf2780 Block: 30895436
+
+        :param str to: The username of the account you want to send coins to
+        :param Decimal amount: The amount of coins to send, as either a ``Decimal``, ``str``, ``int`` or ``float``
+        :param str from_account: The username of the account to send from
+        :param str wif: The active/owner private key for the ``from_account``, as a string in WIF format
+
+        :return dict transfer: A dictionary containing info about the completed TX, inc. ``id`` (full ret below)
+
+        **Return data**::
+
+            dict(
+                ref_block_num: int, ref_block_prefix:int,
+                expiration:str, operations:list, extensions:list,
+                signatures:List[str], block_num:int, id:str
+            )
+
+        """
         # to, amount, from_account
         ops = [[
             'transfer_to_vesting',

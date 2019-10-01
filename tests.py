@@ -2,19 +2,26 @@
 """
 Privex Golos-Python Unit Tests
 
-To run these tests:
+**To run these tests**:
+
+.. code-block:: bash
 
     pip3 install -r requirements.txt
     pytest -v tests.py
 
 
+**Enabling extra logging output**:
+
 If you want to see the logging output of the library, use the ``DEBUG`` environment variable, and execute ``tests.py``
 directly (not via pytest, as pytest will filter out the log messages):
+
+
+.. code-block:: bash
 
     DEBUG=true ./tests.py -vv
 
 
-Copyright::
+**Copyright**::
 
     +===================================================+
     |                 © 2019 Privex Inc.                |

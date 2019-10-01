@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Copyright::
 
+Copyright::
+    
     +===================================================+
     |                 © 2019 Privex Inc.                |
     |               https://www.privex.io               |
@@ -49,7 +50,7 @@ from .storage import api_total
 from time import sleep
 from pprint import pprint
 from itertools import cycle
-from .exceptions import GolosException, APINotFound
+from .exceptions import GolosException, APINotFound, RetriesExceeded
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,36 @@ def _find_exception(msg):
 
 
 def error_handler(data: dict = None, msg: str = None):
+    """
+    Extracts and renders the format string inside of a Graphene JSON error object, then
+    raises the appropriate exception using :py:func:`._find_exception`
+    
+    **Example usage**:
+    
+    With a Graphene error result:
+    
+        >>> response = dict(
+        ...     error=dict(
+        ...         message="Could not find API ${api}", data=dict(api='market_history'), code=-381
+        ...     )
+        ... )
+        >>> error_handler(data=response)
+        Traceback (most recent call last):
+          File "<input>", line 1, in <module>
+        APINotFound: 'Error Code -381: Could not find API "market_history"'
+    
+    With a plain string error message:
+    
+        >>> error_handler(msg='random error msg')
+        Traceback (most recent call last):
+          File "<input>", line 1, in <module>
+        GolosException: 'random error msg'
+        
+    
+    :param dict data: The original graphene JSON dict response, containing the ``error`` key
+    :param str msg: If specified, will not parse ``data``, instead will directly pass ``msg`` to
+                    :py:func:`._find_exception` - raising the appropriate exception based on your message.
+    """
     if msg is not None or data is None:
         msg = 'Unknown Golos Error...' if msg is None else msg
         return _find_exception(msg=msg)
@@ -83,15 +114,25 @@ def error_handler(data: dict = None, msg: str = None):
 
 
 class WsClient:
-    """ Simple Golos JSON-WebSocket-RPC API
-        This class serves as an abstraction layer for easy use of the Golos API.
+    """
+    Simple Golos JSON-WebSocket-RPC API
+    This class serves as an abstraction layer for easy use of the Golos API.
 
-        rpc = WsClient(nodes = nodes) or rpc = WsClient()
-        Args:
-            nodes (list): A list of Golos WebSocket RPC nodes to connect to.
+    With manually specified nodes:
+    
+            >>> rpc = WsClient(nodes=['wss://golosd.privex.io'])
+    
+    With no arguments (use the default nodes):
+    
+            >>> rpc = WsClient()
+    
+    Args:
+        nodes (list): A list of Golos WebSocket RPC nodes to connect to.
 
-        any call available to that port can be issued using the instance
-        rpc.call('command', *parameters)
+    Any call available to that node can be issued using the instance
+    
+        >>> rpc.call('command', 'my_param1', 'other_param2')
+    
     """
     nodes: List[str]
     report: bool
@@ -100,6 +141,13 @@ class WsClient:
     ws: websocket.WebSocket
 
     def __init__(self, report=False, nodes: Union[List[str], str] = None, **kwargs):
+        """
+        Constructor for WsClient (GOLOS JSON-WebSocket-RPC Client)
+        
+        :param bool report: If ``True`` - enables more verbose logging output
+        :param list nodes:  A ``List[str]`` of nodes to use, each formatted like: ``wss://golosd.privex.io``
+        :param kwargs:      Any additional keyword arguments, e.g. ``num_retries``
+        """
         self.report = report
         self.num_retries = kwargs.get("num_retries", 20)
         nodes = [nodes] if type(nodes) is str else nodes
@@ -110,6 +158,11 @@ class WsClient:
         self.ws_connect()  # Подключение к ноде
 
     def ws_connect(self):
+        """
+        Attempt to connect to a working GOLOS WebSockets node.
+        
+        :raises RetriesExceeded: When too many failures occurred while re-trying WS connection.
+        """
         cnt = 0
         while True:
             cnt += 1
@@ -129,7 +182,7 @@ class WsClient:
                 raise
             except:
                 if 0 <= self.num_retries < cnt:
-                    raise Exception
+                    raise RetriesExceeded(f"Failed connecting to a working websockets node after {cnt} tries...")
 
                 sleeptime = (cnt - 1) * 2 if cnt < 10 else 10
                 if sleeptime:
@@ -137,7 +190,23 @@ class WsClient:
                     log.info("Retrying in %d seconds", sleeptime)
                     sleep(sleeptime)
 
-    def call(self, name, *args):
+    def call(self, name, *args) -> Union[dict, list, bool]:
+        """
+        Make a JsonRPC call to the current working WS node.
+        
+        **Basic Usage**:
+        
+            >>> accs = WsClient().call('get_accounts', ['someguy123'])
+            >>> accs[0]['owner']
+            'someguy123'
+
+        
+        :param str name: The API method to call, e.g. ``get_accounts``
+        :param Any args: Any extra positional args will be passed as parameters to the JsonRPC call
+        :raises RetriesExceeded: When too many failures occurred while re-trying the JsonRPC call / WS connection.
+        :return dict|list result: The result from the call, generally as a ``dict`` or ``list``
+        :return bool result: In the event of minor errors, ``False`` or ``None`` may be returned.
+        """
         # Определяем для name своё api
         api = self.api_total[name]
         if api:
@@ -162,8 +231,8 @@ class WsClient:
             except KeyboardInterrupt:
                 raise
             except:
-                if -1 < self.num_retries < cnt:
-                    raise Exception  # возможно сделать return False
+                if -1 < self.num_retries < cnt:  # возможно сделать return False
+                    raise RetriesExceeded(f"Failed to make call '{name}' after {cnt} tries...")
                 sleeptime = (cnt - 1) * 2 if cnt < 10 else 10
                 if sleeptime:
                     log.info("Lost connection to node during call(): %s (%d/%d) ", self.url, cnt, self.num_retries)
@@ -194,6 +263,7 @@ class WsClient:
         return response_json.get("result")
 
     def close(self):
+        """Close the connection on the :class:`websocket.WebSocket` object"""
         if self.ws is not None:
             self.ws.close()
 
@@ -201,6 +271,7 @@ class WsClient:
     #     self.close()
 
     def __del__(self):
+        """Clean-up when an instance of this object is deleted"""
         self.close()
 
 

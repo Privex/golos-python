@@ -1,36 +1,51 @@
 """
-+===================================================+
-|                 © 2019 Privex Inc.                |
-|               https://www.privex.io               |
-+===================================================+
-|                                                   |
-|        Privex's Golos Library                     |
-|        License: X11/MIT                           |
-|                                                   |
-|        Core Developer(s):                         |
-|                                                   |
-|          (+)  Chris (@someguy123) [Privex]        |
-|                                                   |
-+===================================================+
+Golos Python Library (golos-python) - Developed by Privex Inc. (https://www.privex.io) and released under
+the MIT License.
 
-Privex's Golos Python Library
-Copyright (c) 2019    Privex Inc. ( https://www.privex.io )
+**Official Repo:** https://github.com/Privex/golos-python
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
-files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
-modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
-Software is furnished to do so, subject to the following conditions:
+**Official PyPi Package Name:** ``golos-python``
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of
-the Software.
+**Copyright**::
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+    +===================================================+
+    |                 © 2019 Privex Inc.                |
+    |               https://www.privex.io               |
+    +===================================================+
+    |                                                   |
+    |        Privex's Golos Library                     |
+    |        License: X11/MIT                           |
+    |                                                   |
+    |        Core Developer(s):                         |
+    |                                                   |
+    |          (+)  Chris (@someguy123) [Privex]        |
+    |                                                   |
+    +===================================================+
 
-Except as contained in this notice, the name(s) of the above copyright holders shall not be used in advertising or
-otherwise to promote the sale, use or other dealings in this Software without prior written authorization.
+    Privex's Golos Python Library
+    Copyright (c) 2019    Privex Inc. ( https://www.privex.io )
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of
+    this software and associated documentation files (the "Software"), to deal in
+    the Software without restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+    Software, and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+    Except as contained in this notice, the name(s) of the above copyright holders
+    shall not be used in advertising or otherwise to promote the sale, use or other
+    dealings in this Software without prior written authorization.
+
 """
 import logging
 from golos.api import Api
@@ -41,7 +56,7 @@ from golos.exceptions import *
 from golos.broadcast import Tx
 
 name = 'golos'
-VERSION = '0.9.0'
+VERSION = '1.0.0'
 
 
 def setup_logging(log_level=logging.INFO):
