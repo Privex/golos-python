@@ -1,7 +1,7 @@
 dist: bionic
 language: python
 env:
-  - CODECOV_TOKEN=""
+  - CODECOV_TOKEN="c542c6e4-7305-49ce-b4aa-c6481cc44c1a"
 python:
   - "3.6"
   - "3.7"
@@ -12,6 +12,6 @@ install:
   - pip install -r requirements.txt
   - pip install .
 script: pytest --cov=./golos tests.py
-#after_success:
-#  - codecov
-#
+after_success:
+  - codecov
+
