@@ -32,10 +32,19 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 Except as contained in this notice, the name(s) of the above copyright holders shall not be used in advertising or
 otherwise to promote the sale, use or other dealings in this Software without prior written authorization.
 """
+import logging
 from golos.api import Api
 from golos.key import Key, PrivateKey, PublicKey
 from golos.ws_client import WsClient
 from golos.types import *
+from golos.exceptions import *
+from golos.broadcast import Tx
 
 name = 'golos'
 VERSION = '0.9.0'
+
+
+def setup_logging(log_level=logging.INFO):
+    from privex.loghelper import LogHelper
+    lh = LogHelper(__name__, handler_level=log_level)
+    lh.add_console_handler()

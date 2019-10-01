@@ -1,4 +1,44 @@
 # -*- coding: utf-8 -*-
+"""
+Copyright::
+
+    +===================================================+
+    |                 © 2019 Privex Inc.                |
+    |               https://www.privex.io               |
+    +===================================================+
+    |                                                   |
+    |        Privex's Golos Library                     |
+    |        License: X11/MIT                           |
+    |                                                   |
+    |        Core Developer(s):                         |
+    |                                                   |
+    |          (+)  Chris (@someguy123) [Privex]        |
+    |                                                   |
+    +===================================================+
+
+    Privex's Golos Python Library
+    Copyright (c) 2019    Privex Inc. ( https://www.privex.io )
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of
+    this software and associated documentation files (the "Software"), to deal in
+    the Software without restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+    Software, and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+"""
+from typing import Union, List
 
 import websocket
 import ssl
@@ -9,8 +49,37 @@ from .storage import api_total
 from time import sleep
 from pprint import pprint
 from itertools import cycle
+from .exceptions import GolosException, APINotFound
 
 log = logging.getLogger(__name__)
+
+
+def _find_exception(msg):
+    if 'could not find api' in msg.lower():
+        raise APINotFound(msg)
+
+    raise GolosException(msg)
+
+
+def error_handler(data: dict = None, msg: str = None):
+    if msg is not None or data is None:
+        msg = 'Unknown Golos Error...' if msg is None else msg
+        return _find_exception(msg=msg)
+
+    err = data.get("error", {})
+    msg, errdata = err.get("message", 'Unknown Golos Error...'), err.get("data", {})
+
+    # Replace format variables such as ${api} with data['api']
+    for k, d in errdata.items():
+        fmtvar = '${' + k + '}'
+        while fmtvar in msg:
+            msg = msg.replace('${' + k + '}', f'"{d}"')
+
+    msg = f"Error Code {err.get('code', 'n/a')}: {msg}"
+    log.error('GOLOS Error: %s', msg)
+    log.error('Raw error: %s', err)
+
+    return _find_exception(msg=msg)
 
 
 class WsClient:
@@ -24,10 +93,16 @@ class WsClient:
         any call available to that port can be issued using the instance
         rpc.call('command', *parameters)
     """
+    nodes: List[str]
+    report: bool
+    api_total: dict
+    url: str
+    ws: websocket.WebSocket
 
-    def __init__(self, report=False, nodes=None, **kwargs):
+    def __init__(self, report=False, nodes: Union[List[str], str] = None, **kwargs):
         self.report = report
         self.num_retries = kwargs.get("num_retries", 20)
+        nodes = [nodes] if type(nodes) is str else nodes
         self.nodes = cycle(storage.nodes if nodes is None else nodes)  # Перебор нод
         self.api_total = api_total
         self.url = ''
@@ -40,7 +115,7 @@ class WsClient:
             cnt += 1
             self.url = next(self.nodes)
             if self.report:
-                log.info("Trying to connect to node %s" % self.url)
+                log.info("Trying to connect to node %s", self.url)
             if self.url[:3] == "wss":
                 sslopt_ca_certs = {'cert_reqs': ssl.CERT_NONE}
                 self.ws = websocket.WebSocket(sslopt=sslopt_ca_certs)
@@ -107,19 +182,26 @@ class WsClient:
             if self.report:
                 log.error('not response')
             return False
-        response_json = json.loads(response)  # Нет проверки на ошибки при загрузке данных
+        rj = response_json = json.loads(response)  # Нет проверки на ошибки при загрузке данных
 
         if 'error' in response_json:
-            if self.report:
-                log.error('find error')
-                log.error(response_json["error"]["message"])
-            return False
+            return error_handler(rj)
         if 'result' not in response_json:
             if self.report:
-                log.error('not result')
+                log.error("No 'result' key found in response...")
             return False
 
         return response_json.get("result")
+
+    def close(self):
+        if self.ws is not None:
+            self.ws.close()
+
+    # def __exit__(self, exc_type, exc_val, exc_tb):
+    #     self.close()
+
+    def __del__(self):
+        self.close()
 
 
 # ----- main -----

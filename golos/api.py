@@ -1,12 +1,52 @@
+"""
+Copyright::
+
+    +===================================================+
+    |                 © 2019 Privex Inc.                |
+    |               https://www.privex.io               |
+    +===================================================+
+    |                                                   |
+    |        Privex's Golos Library                     |
+    |        License: X11/MIT                           |
+    |                                                   |
+    |        Core Developer(s):                         |
+    |                                                   |
+    |          (+)  Chris (@someguy123) [Privex]        |
+    |                                                   |
+    +===================================================+
+
+    Privex's Golos Python Library
+    Copyright (c) 2019    Privex Inc. ( https://www.privex.io )
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of
+    this software and associated documentation files (the "Software"), to deal in
+    the Software without restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+    Software, and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+"""
 # -*- coding: utf-8 -*-
 
 import json
 import logging
 import math
 from datetime import datetime
+from decimal import Decimal
 from pprint import pprint
 from time import time
-from typing import Union
+from typing import Union, List, Tuple
 
 from .broadcast import Tx
 from .key import Key
@@ -16,6 +56,11 @@ from .ws_client import WsClient
 log = logging.getLogger(__name__)
 
 
+Number = Union[Decimal, float, int, str]
+
+DEFAULT_ASSET = 'GOLOS'
+
+
 class Api:
 
     def __init__(self, nodes=None, **kwargs):
@@ -23,9 +68,9 @@ class Api:
         log.debug('connect b4 GOLOS')
         # Пользуемся своими нодами или новыми
         if nodes:
-            self.rpc = WsClient(nodes=nodes)
+            self.rpc = WsClient(nodes=nodes, **kwargs)
         else:
-            self.rpc = WsClient()
+            self.rpc = WsClient(**kwargs)
 
         log.debug('get config GOLOS')
         config_golos = self.rpc.call('get_config')
@@ -199,64 +244,51 @@ class Api:
         tx = self.finalizeOp(ops, wif)
         return tx
 
-    def transfer(self, to, amount, asset, from_account, wif, **kwargs):
+    def _transfer_op(self, to: str, amount: Number, from_account: str, asset: str = DEFAULT_ASSET, **kwargs) -> dict:
+        """
+        Generate a transfer operation as a ``dict`` based on the parameters.
 
-        # to, amount, asset, from_account, [memo]
-        memo = kwargs.pop('memo', '')
+        Note: If ``memo`` is not present in the ``**kwargs``, it will be excluded from the operation dict
+              (this is intentional, to allow for operations such as vesting which do not use memos).
 
-        ops = []
+        """
         op = {
             "from": from_account,
             "to": to,
             "amount": '{:.{precision}f} {asset}'.format(
-                float(amount),
-                precision=self.asset_precision[asset],
-                asset=asset
-            ),
-            "memo": memo
+                Decimal(amount), precision=self.asset_precision[asset], asset=asset
+            )
         }
+        if 'memo' in kwargs:
+            op['memo'] = kwargs['memo']
+        return op
+
+    def transfer(self, to: str, amount: Number, asset: str, from_account: str, wif: str, memo='', **kwargs):
+        # to, amount, asset, from_account, [memo]
+
+        ops = []
+        op = self._transfer_op(to=to, amount=amount, asset=asset, from_account=from_account, memo=memo)
         ops.append(['transfer', op])
         tx = self.finalizeOp(ops, wif)
         return tx
 
-    def transfers(self, raw_ops, from_account, wif):
-
+    def transfers(self, raw_ops: Tuple[str, Number, str, str], from_account: str, wif: str):
         # to, amount, asset, memo
-
         ops = []
         for raw in raw_ops:
             to, amount, asset, memo = raw
-            op = {
-                "from": from_account,
-                "to": to,
-                "amount": '{:.{precision}f} {asset}'.format(
-                    float(amount),
-                    precision=self.asset_precision[asset],
-                    asset=asset
-                ),
-                "memo": memo
-            }
+            op = self._transfer_op(to=to, amount=amount, asset=asset, from_account=from_account, memo=memo)
             ops.append(['transfer', op])
 
         tx = self.finalizeOp(ops, wif)
         return tx
 
-    def transfer_to_vesting(self, to, amount, from_account, wif, **kwargs):
-
+    def transfer_to_vesting(self, to: str, amount: Number, from_account: str, wif: str, **kwargs):
         # to, amount, from_account
-        asset = 'GOLOS'
-
-        ops = []
-        op = {
-            "from": from_account,
-            "to": to,
-            "amount": '{:.{precision}f} {asset}'.format(
-                float(amount),
-                precision=self.asset_precision[asset],
-                asset=asset
-            ),
-        }
-        ops.append(['transfer_to_vesting', op])
+        ops = [[
+            'transfer_to_vesting',
+            self._transfer_op(to=to, amount=amount, asset=DEFAULT_ASSET, from_account=from_account)
+        ], ]
         tx = self.finalizeOp(ops, wif)
         return tx
 
@@ -659,7 +691,7 @@ class Api:
 
         return round(base / quote, asset_precision["GBG"])
 
-    def get_follow(self, account):
+    def get_follow(self, account: str):
 
         follow = {"follower": [], "following": []}
         account_follow = self.rpc.call('get_follow_count', account)
@@ -722,7 +754,7 @@ class Api:
 
     ##### ##### account_by_key ##### #####
 
-    def get_key_references(self, public_key):
+    def get_key_references(self, public_key: str):
         """
         Позволяет узнать какому логину соответсвует публичный ключ
         #public_key = 'GLS6RGi692mJSNkdcVRunY3tGieJdTsa7AZeBVjB6jjqYg98ov5NL'
@@ -738,7 +770,7 @@ class Api:
 
     ##### ##### account_history ##### #####
 
-    def get_account_history(self, account, **kwargs):
+    def get_account_history(self, account: str, **kwargs):
 
         start_limit = kwargs.pop("start_limit", 1000)  # лимит одновременного запроса
         op_limit = kwargs.pop("type_op", 'all')  # какие операции сохранять, list
@@ -789,11 +821,11 @@ class Api:
 
     ##### ##### database_api ##### #####
 
-    def get_account_count(self):
+    def get_account_count(self) -> int:
         # Возвращает количество зарегестрированных пользователей
         return int(self.rpc.call('get_account_count'))
 
-    def get_accounts(self, logins, **kwargs):
+    def get_accounts(self, logins: List[str], **kwargs) -> List[dict]:
         """
         Перерасчитываются некоторые параметры по аккаунту
         "voting_power" - 1..10000 реальная батарейка
@@ -1170,6 +1202,9 @@ class Api:
             return public_key
 
         return False
+
+    def __del__(self):
+        self.rpc.close()
 
 
 # ----- common def -----

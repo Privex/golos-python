@@ -1,0 +1,14 @@
+# Core requirements
+websocket>=0.2
+graphenelib>=1.1
+privex-helpers>=1.3
+
+# Unit testing
+coverage
+pytest
+pytest-cov
+codecov
+
+# Package Building
+setuptools
+wheel

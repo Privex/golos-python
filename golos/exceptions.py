@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
 """
+Various Python exceptions which may be used throughout this GOLOS library.
+
 Copyright::
 
     +===================================================+
@@ -39,38 +40,12 @@ Copyright::
 
 """
 
-from setuptools import setup, find_packages
-from os.path import join, dirname, abspath
-from golos import VERSION
 
-BASE_DIR = dirname(abspath(__file__))
+class GolosException(Exception):
+    """Base exception for all Golos-Python exceptions"""
+    pass
 
-with open(join(BASE_DIR, "README.md"), "r") as fh:
-    long_description = fh.read()
 
-setup(
-    name='golos-python',
-
-    version=VERSION,
-
-    description='Golos Python API by Privex Inc',
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/Privex/golos-python",
-    author='Chris (Someguy123) @ Privex',
-    author_email='chris@privex.io',
-
-    license='MIT',
-    install_requires=[
-        'websocket', 'graphenelib', 'privex-helpers'
-    ],
-    packages=find_packages(),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-    ],
-)
+class APINotFound(GolosException):
+    """Raised when an RPC node does not support the requested API"""
+    pass
