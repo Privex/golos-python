@@ -50,7 +50,7 @@ from .storage import api_total
 from time import sleep
 from pprint import pprint
 from itertools import cycle
-from .exceptions import GolosException, APINotFound, RetriesExceeded
+from .exceptions import GolosException, APINotFound, RetriesExceeded, TransactionNotFound
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,9 @@ log = logging.getLogger(__name__)
 def _find_exception(msg):
     if 'could not find api' in msg.lower():
         raise APINotFound(msg)
+    
+    if 'missing transaction with id' in msg.lower():
+        raise TransactionNotFound(msg)
 
     raise GolosException(msg)
 

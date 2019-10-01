@@ -56,7 +56,7 @@ from golos.exceptions import *
 from golos.broadcast import Tx
 
 name = 'golos'
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 
 
 def setup_logging(log_level=logging.INFO):

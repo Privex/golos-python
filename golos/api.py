@@ -41,16 +41,19 @@ Copyright::
 
 """
 # -*- coding: utf-8 -*-
-
+import hashlib
 import json
 import logging
 import math
+from binascii import unhexlify
 from datetime import datetime
 from decimal import Decimal
 from pprint import pprint
 from time import time
 from typing import Union, List, Tuple, Dict
 
+from golos.extras import dict_sort
+from .exceptions import TransactionNotFound
 from .broadcast import Tx
 from .key import Key
 from .storage import time_format, asset_precision, rus_d, rus_list
@@ -165,6 +168,144 @@ class Api:
 
         log.debug('complite')
 
+    def get_transaction_hex(self, tx: dict, remove_sigs=False) -> str:
+        """
+        Get the string hexadecimal representation of a ``dict`` transaction object.
+        
+        **Example Usage**:
+        
+            >>> tx = {
+            ...     'ref_block_num': 27979, 'ref_block_prefix': 3018856747, 'expiration': '2019-10-01T12:50:00',
+            ...     'operations': [
+            ...         ['transfer',
+            ...          {'from': 'someguy123', 'to': 'ksantoprotein', 'amount': '0.100 GOLOS', 'memo': 'testing'}]
+            ...     ],
+            ...     'extensions': [], 'signatures': []
+            ... }
+            >>> Api().get_transaction_hex(tx)
+            '4b6d2b19f0b3784b935d01020a736f6d656775793132330d6b73616e746f70726f7465696e640000000000000003474f4c4f53
+             00000774657374696e6700'
+
+        :param dict tx: A transaction as a ``dict`` in the form:
+                        ``dict(ref_block_num, ref_block_prefix, expiration, operations, extensions, signatures)``
+        :param bool remove_sigs: (Default: ``False``) Replace the ``signatures`` key with ``[]`` (for TXID generation)
+        :return str txhex: The hexadecimal representation of the transaction
+        """
+        tx = dict(tx)
+        if remove_sigs:
+            tx['signatures'] = []
+        txhex = self.rpc.call('get_transaction_hex', tx)
+        return str(txhex)
+    
+    def get_transaction_id(self, tx: dict) -> str:
+        """
+        Calculate the TXID for a transaction in the ``dict`` form:
+        
+        ``dict(ref_block_num, ref_block_prefix, expiration, operations, extensions, signatures)``
+        
+        
+            >>> tx = {
+            ...     'ref_block_num': 27979, 'ref_block_prefix': 3018856747, 'expiration': '2019-10-01T12:50:00',
+            ...     'operations': [
+            ...         ['transfer',
+            ...          {'from': 'someguy123', 'to': 'ksantoprotein', 'amount': '0.100 GOLOS', 'memo': 'testing'}]
+            ...     ],
+            ...     'extensions': [], 'signatures': []
+            ... }
+            >>> Api().get_transaction_id(tx)
+            'c901c52daf57b60242d9d7be67f790e023cf2780'
+        
+        :param dict tx: A transaction as a ``dict`` in the form:
+                        ``dict(ref_block_num, ref_block_prefix, expiration, operations, extensions, signatures)``
+        :return str txid: The calculated transaction ID for the given transaction
+        """
+        txhex = self.get_transaction_hex(tx, remove_sigs=True)
+        m = hashlib.sha256()
+        m.update(unhexlify(txhex))
+        txhash = m.hexdigest()
+        
+        return txhash[:40]
+    
+    def get_transaction(self, txid: str) -> dict:
+        """
+        Lookup the transaction ID ``txid`` and return it's matching transaction as a ``dict``
+        
+        **Example usage**:
+        
+            >>> Api().get_transaction('c901c52daf57b60242d9d7be67f790e023cf2780')
+            {'ref_block_num': 27979, 'ref_block_prefix': 3018856747, 'expiration': '2019-10-01T12:50:00',
+             'operations': [['transfer',
+                {'from': 'someguy123', 'to': 'ksantoprotein', 'amount': '0.100 GOLOS', 'memo': 'testing'}
+              ]],
+              'extensions': [],
+              'signatures': ['1f1a0212f7b9fe263acaeadf1ec127000dc234c413b543e3c268d251e...']
+            }
+        
+        :param str txid: A string hex transaction ID to lookup
+        :raises TransactionNotFound: When the transaction ID could not be found on the blockchain.
+        :return dict tx: The matching transaction as a ``dict``
+        """
+        return self.rpc.call('get_transaction', txid)
+    
+    def find_op_transaction(self, op: dict, ignore_keys: list = None) -> dict:
+        """
+        Locate and return the full transaction from the blockchain based on a ``dict`` operation (``op``)
+        
+        The operation dictionary must contain at least ``block``, as well as all of the operation keys that
+        would be found on the blockchain, with the values being the same type as they would be on the blockchain.
+        
+        **Example usage**:
+        
+            >>> op = {'from':  'someguy123', 'to': 'ksantoprotein', 'amount': '0.100 GOLOS', 'memo': 'testing',
+            ...       'number': 127287, 'block': 30895436, 'timestamp': '2019-10-01T12:49:00', 'type_op': 'transfer'}
+            >>> Api().find_op_transaction(op)
+            {'ref_block_num': 27979, 'ref_block_prefix': 3018856747, 'expiration': '2019-10-01T12:50:00',
+             'operations': [['transfer',
+                {'from': 'someguy123', 'to': 'ksantoprotein', 'amount': '0.100 GOLOS', 'memo': 'testing'}
+              ]],
+              'extensions': [],
+              'signatures': ['1f1a0212f7b9fe263acaeadf1ec127000dc234c413b543e3c268d251e...']
+            }
+
+
+        :param dict op: An operation as a ``dict``, containing the key ``block``, and any operation keys to match
+        :param list ignore_keys: (Optional) Additional dict keys to remove from ``op``
+        :raises TransactionNotFound: When a matching transaction could not be found on the blockchain.
+        :return dict tx: The full transaction found on the blockchain as a ``dict``
+        
+        A returned transaction is generally formatted like such::
+        
+            dict(ref_block_num: int, ref_block_prefix: int, expiration: str, operations: list,
+                 extensions: list, signatures: list)
+        
+        
+        """
+        ignore_keys = [] if not ignore_keys else ignore_keys
+        ignore_keys += ['number', 'block', 'timestamp', 'type_op']
+        
+        orig_tx = dict(op)
+        if 'block' not in orig_tx:
+            raise AttributeError("Error: find_transaction requires that 'op' contains the key 'block'")
+        
+        # Filter out any dict keys which don't exist on blockchain transactions, so we can compare the passed TX
+        # to TXs inside of a block.
+        clean_tx = dict(op)
+        clean_tx = {k: v for k, v in clean_tx.items() if k not in ignore_keys}
+
+        # Load the block specified in the original TX, and search for a matching transaction.
+        block = self.get_block(int(orig_tx['block']))
+        for t in block['transactions']:
+            for op in t['operations']:
+                if 'type_op' in orig_tx and op[0] != orig_tx['type_op']:
+                    continue
+                tx_op = dict_sort(op[1])
+                orig_op = dict_sort(clean_tx)
+                if tx_op == orig_op:
+                    return t
+        
+        raise TransactionNotFound(f'Transaction could not be found: {str(orig_tx)}')
+                    
+        
     ##### ##### BROADCAST ##### #####
 
     def vote(self, url, weight, voters, wif):

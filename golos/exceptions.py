@@ -54,3 +54,8 @@ class APINotFound(GolosException):
 class RetriesExceeded(GolosException):
     """Raised when a function has exceeded it's maximum retries and refuses to continue"""
     pass
+
+
+class TransactionNotFound(GolosException):
+    """Raised when a requested transaction could not be located"""
+    pass
