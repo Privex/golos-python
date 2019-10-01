@@ -49,14 +49,14 @@ the MIT License.
 """
 import logging
 from golos.api import Api
-from golos.key import Key, PrivateKey, PublicKey
+from golos.key import Key
 from golos.ws_client import WsClient
 from golos.types import *
 from golos.exceptions import *
 from golos.broadcast import Tx
 
 name = 'golos'
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 
 
 def setup_logging(log_level=logging.INFO):

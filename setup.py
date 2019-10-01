@@ -62,7 +62,10 @@ setup(
 
     license='MIT',
     install_requires=[
-        'websocket', 'graphenelib', 'privex-helpers'
+        'websocket-client',
+        'urllib3',
+        'privex-helpers',
+        'ecdsa>=0.13',
     ],
     packages=find_packages(),
     classifiers=[

@@ -61,7 +61,7 @@ directly (not via pytest, as pytest will filter out the log messages):
 """
 import unittest
 import logging
-from golos import Api, storage
+from golos import Api, storage, Key
 from privex.loghelper import LogHelper
 from privex.helpers import env_bool
 
@@ -113,6 +113,39 @@ class GolosTestCase(unittest.TestCase):
             self.assertIs(type(w['props']), dict)
             self.assertIs(type(w['total_missed']), int)
 
+
+class GolosKeyTests(unittest.TestCase):
+    
+    def test_compare_keys(self):
+        """Test that Key.is_key correctly verifies a public key matches a private key"""
+        
+        kp1 = '5Jq19TeeVmGrBFnu32oxfxQMiipnSCKmwW7fZGUVLAoqsKJ9JwP', \
+              'GLS7qHue1h2eWV8M7WKtb6F8dbhKfEFvLVy9JqvSTHBBEM5JMdsmh'
+        
+        kp2 = '5KPQo2iNeACYagW5qAsgNpFxDDuwuArCCG8PvU6FKTMcD5LmhzJ', \
+              'GLS8G7rgqhPUbyzYVYWb8BPcHtpgLDmJYooHmHPbaLaH7cdywsdwm'
+        
+        t1 = Key.is_key(kp1[0], kp1[1])  # Compare keypair 1's private key against it's own public key
+        t2 = Key.is_key(kp1[0], kp2[1])  # Compare keypair 1's private key against keypair 2's public key
+        self.assertTrue(t1)
+        self.assertFalse(t2)
+    
+    def test_get_public(self):
+        """Test Key.get_public_from_private returns the correct public key"""
+        pub = Key.get_public_from_private('5Jq19TeeVmGrBFnu32oxfxQMiipnSCKmwW7fZGUVLAoqsKJ9JwP')
+        self.assertEqual(pub, 'GLS7qHue1h2eWV8M7WKtb6F8dbhKfEFvLVy9JqvSTHBBEM5JMdsmh')
+    
+    def test_account_keys(self):
+        """Test Key.get_keys correctly generates account public/private keys"""
+        acc = Key.get_keys('someguy123', 'example')
+        
+        for r in Key.roles:
+            self.assertIn(r, acc['private'], msg=f'{r} in acc["private"]')
+            self.assertIn(r, acc['public'], msg=f'{r} in acc["public"]')
+        
+        self.assertEqual(acc['private']['active'], '5KME2a7DBdGBdpAwLC4tGmJ8mSz9HgZkcMtKc8rkADn6cLZyvPc')
+        self.assertEqual(acc['public']['active'], 'GLS7LjcmXF4mf9z3MNgcceSvMG8oezEtGhcL4yAXpJWFZxdX47ET7')
+        
 
 if __name__ == "__main__":
     unittest.main()
