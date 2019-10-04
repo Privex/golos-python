@@ -1,5 +1,5 @@
 base58decode
-=========================
+============
 
 .. currentmodule:: golos.base58
 

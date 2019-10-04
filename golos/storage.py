@@ -240,6 +240,13 @@ asset_precision = {
 }
 """Decimal places used for each known asset symbol"""
 
+asset_account_keys = dict(
+    GOLOS='GOLOS',
+    GBG='GBG',
+    GP='GP',
+    GESTS='GESTS',
+)
+
 rus_d = {
     'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
     'е': 'e', 'ё': 'yo', 'ж': 'zh', 'з': 'z', 'и': 'i',

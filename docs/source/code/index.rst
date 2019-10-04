@@ -9,6 +9,7 @@ Code / API Documentation
     golos.base58
     golos.broadcast
     golos.exceptions
+    golos.extras
     golos.key
     golos.operations
     golos.storage

@@ -1,5 +1,5 @@
 gphBase58CheckDecode
-=================================
+====================
 
 .. currentmodule:: golos.base58
 

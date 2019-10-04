@@ -1,5 +1,5 @@
 base58encode
-=========================
+============
 
 .. currentmodule:: golos.base58
 

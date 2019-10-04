@@ -1,5 +1,5 @@
 Base58
-===================
+======
 
 .. currentmodule:: golos.base58
 

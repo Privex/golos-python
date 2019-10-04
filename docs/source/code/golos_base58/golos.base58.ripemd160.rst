@@ -1,5 +1,5 @@
 ripemd160
-======================
+=========
 
 .. currentmodule:: golos.base58
 

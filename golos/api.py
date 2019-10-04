@@ -47,16 +47,18 @@ import logging
 import math
 from binascii import unhexlify
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from pprint import pprint
 from time import time
 from typing import Union, List, Tuple, Dict
 
+from privex.helpers import dec_round, r_cache
+
 from golos.extras import dict_sort
-from .exceptions import TransactionNotFound
+from .exceptions import TransactionNotFound, GolosException
 from .broadcast import Tx
 from .key import Key
-from .storage import time_format, asset_precision, rus_d, rus_list
+from .storage import time_format, asset_precision, rus_d, rus_list, asset_account_keys
 from .ws_client import WsClient
 
 log = logging.getLogger(__name__)
@@ -168,6 +170,36 @@ class Api:
 
         log.debug('complite')
 
+    @property
+    @r_cache('golos:chain_props', cache_time=30)
+    def chain_properties(self) -> dict:
+        """
+        This property loads and caches the chain properties for up to 30 seconds, avoiding constant
+        un-necessary requests for the chain properties.
+        
+        :return dict props: A dictionary of chain properties
+        """
+        props = self.get_chain_properties()
+        if not props:
+            log.debug('error in global data')
+            raise GolosException('Error obtaining chain props...')
+        return props
+
+    @property
+    @r_cache('golos:dyn_glob_props', cache_time=30)
+    def dynamic_global_properties(self) -> dict:
+        """
+        This property loads and caches the dynamic global properties for up to 30 seconds, avoiding constant
+        un-necessary requests for the dynamic global properties.
+
+        :return dict props: A dictionary of dynamic global properties
+        """
+        props = self.get_dynamic_global_properties()
+        if not props:
+            log.debug('error in global data')
+            raise GolosException('Error obtaining dynamic global props...')
+        return props
+    
     def get_transaction_hex(self, tx: dict, remove_sigs=False) -> str:
         """
         Get the string hexadecimal representation of a ``dict`` transaction object.
@@ -304,9 +336,8 @@ class Api:
                     return t
         
         raise TransactionNotFound(f'Transaction could not be found: {str(orig_tx)}')
-                    
-        
-    ##### ##### BROADCAST ##### #####
+
+    # ----- BROADCAST ----- #
 
     def vote(self, url, weight, voters, wif):
 
@@ -1058,7 +1089,7 @@ class Api:
 
         return user_post
 
-    ##### ##### account_by_key ##### #####
+    # ----- account_by_key ----- #
 
     def get_key_references(self, public_key: str):
         """
@@ -1074,18 +1105,51 @@ class Api:
             # pprint(res)
             return False
 
-    ##### ##### account_history ##### #####
+    # ----- account_history ----- #
 
-    def get_account_history(self, account: str, **kwargs):
+    # noinspection PyIncorrectDocstring
+    def get_account_history(self, account: str, op_limit: Union[list, str] = 'all', **kwargs) -> List[dict]:
+        r"""
+        Get the account history for a given ``account`` as a ``List[dict]``.
+        
+        Optionally you can filter the operations returned using ``op_limit``, as well as limit the number of operations
+        with ``start_limit``, and maximum operation age with ``age``.
+        
+        **Basic usage**::
+        
+            >>> g = Api()
+            >>> # Return a list of 'transfer' operations for the account 'someguy123'
+            >>> hist = g.get_account_history('someguy123', op_limit='transfer')
+            >>> h[0]
+            {'from': 'someguy123', 'to': 'someguy123', 'amount': '0.100 GOLOS', 'memo': 'testing', 'number': 127290,
+             'block': 30908474, 'timestamp': '2019-10-01T23:41:18', 'type_op': 'transfer',
+             'trx_id': '80c7e0f7444f63074a52a8ba44cf066551706588'}
+        
+        :param str account: The username to load account history for, e.g. ``'someguy123'``
+        :param list op_limit: Only return operations of these types. Specify either as a list: ``['transfer', 'vote']``,
+                              or as a string, e.g. ``'transfer'`` (only transfers) or ``'all'`` (no filter)
+        
+        :param \**kwargs:
+            See below
+
+        :Keyword Arguments:
+            * *start_limit* (``int``) --
+              Load at most this many history items (Default: ``1000`` items)
+            * *age* (``int``) --
+              Skip history items older than this many seconds (Default: ``604800`` seconds / 7 days)
+        :return List[dict] history: A ``list`` of ``dict`` history ops (see below for format)
+        
+        .. code-block:: python
+            
+            dict(from, to, amount: str, memo, number, block, timestamp: str, type_op, trx_id)
+            
+        
+        """
 
         start_limit = kwargs.pop("start_limit", 1000)  # лимит одновременного запроса
-        op_limit = kwargs.pop("type_op", 'all')  # какие операции сохранять, list
         age_max = kwargs.pop("age", 7 * 24 * 60 * 60)  # время в сек до какой операции сканировать
 
-        info = self.get_dynamic_global_properties()
-        if not info:
-            log.debug('error in global data')
-            return False
+        info = self.dynamic_global_properties
         raw = []
 
         start_block, flag, n = 999999999, True, 0
@@ -1103,6 +1167,7 @@ class Api:
                 op["block"] = block
                 op["timestamp"] = timestamp
                 op["type_op"] = type_op
+                op["trx_id"] = h[1]["trx_id"]
 
                 if type_op in op_limit or op_limit == 'all':
                     raw.append(op)
@@ -1125,12 +1190,68 @@ class Api:
 
         return raw
 
-    ##### ##### database_api ##### #####
+    # ----- database_api ----- #
 
     def get_account_count(self) -> int:
         # Возвращает количество зарегестрированных пользователей
         return int(self.rpc.call('get_account_count'))
-
+    
+    def vests_to_power(self, vests: Number) -> Decimal:
+        """
+        
+        **Basic Usage**::
+        
+            >>> Api().vests_to_power('50058788')  # Convert ``50058788 GESTS`` into ``GOLOS``
+            Decimal('15043.793')
+        
+        :param Number vests: An amount in VESTS/GESTS to convert to SP / GP
+        :return Decimal power: The value of the VESTS / GESTS in STEEM / GOLOS
+        """
+        vests = Decimal(vests)
+        info = self.dynamic_global_properties
+        
+        total_vests = Decimal(info['total_vesting_fund_steem'])
+        total_shares = Decimal(info['total_vesting_shares'])
+        return dec_round((total_vests * vests) / total_shares, dp=3, rounding=ROUND_DOWN)
+    
+    def get_balances(self, *accounts) -> Dict[str, Dict[str, Decimal]]:
+        """
+        Get all balances for one or more ``accounts`` (as positional arguments).
+        
+        **Basic Usage**::
+        
+            >>> b = Api().get_balances('john', 'dave')
+            >>> b['john']['GOLOS']
+            Decimal('4183.323')
+            >>> b['dave']['GBG']
+            Decimal('837.978')
+        
+            
+        :param str accounts: One or more usernames to get balances for
+        :return dict balances: A dict of ``{account: {asset: balance, ..}, ..}``, for example:
+        
+        .. code-block:: python
+        
+            {
+                'someguy123': {
+                    'GOLOS': Decimal('157560.131'),
+                    'GBG': Decimal('6420.916'),
+                    'GP': Decimal('15044.951'),
+                    'GESTS': Decimal('50058788.632180')
+                }
+            }
+        
+        
+        """
+        accs = self.get_accounts(list(accounts))
+        res = {}
+        for a in accs:
+            b = res[a['name']] = {}
+            for asset, akey in asset_account_keys.items():
+                b[asset] = Decimal(a[akey])
+        
+        return res
+    
     def get_accounts(self, logins: List[str], **kwargs) -> List[dict]:
         """
         Перерасчитываются некоторые параметры по аккаунту
@@ -1158,11 +1279,11 @@ class Api:
         median_price = self.get_median_price()
         order_price = self.get_order_price()
 
-        info = self.get_dynamic_global_properties()
+        info = self.dynamic_global_properties
         if not info:
             log.debug('error in global data')
-            return False
-
+            raise GolosException('Error obtaining dynamic global props...')
+        
         for account in accounts:
 
             # Определение реальной батарейки 1-10000
@@ -1206,8 +1327,10 @@ class Api:
 
             # Определение ликвидных токенов
 
-            account["GOLOS"] = float(str(account["balance"]).split()[0])
-            account["GBG"] = float(str(account["sbd_balance"]).split()[0])
+            account["GOLOS"] = Decimal(str(account["balance"]).split()[0])
+            account["GBG"] = Decimal(str(account["sbd_balance"]).split()[0])
+            account["GESTS"] = Decimal(str(account["vesting_shares"]).split()[0])
+            account["GP"] = self.vests_to_power(account['GESTS'])
 
             # Определение post_bandwidth
 
@@ -1303,7 +1426,24 @@ class Api:
     def get_block(self, n):
         return self.rpc.call('get_block', str(n))
 
-    def get_chain_properties(self):
+    def get_chain_properties(self) -> dict:
+        """
+
+
+        :return dict props: A dictionary of chain properties, containing:
+        
+        .. code-block:: python
+        
+                dict(account_creation_fee, maximum_block_size, sbd_interest_rate, create_account_min_golos_fee,
+                     create_account_min_delegation, create_account_delegation_time, min_delegation,
+                     max_referral_interest_rate, max_referral_term_sec, min_referral_break_fee, max_referral_break_fee,
+                     posts_window, posts_per_window, comments_window, comments_per_window, votes_window,
+                     votes_per_window, auction_window_size, max_delegated_vesting_interest_rate,
+                     custom_ops_bandwidth_multiplier, min_curation_percent, max_curation_percent, curation_reward_curve,
+                     allow_distribute_auction_reward, allow_return_auction_reward_to_fund)
+        
+          
+        """
         return self.rpc.call('get_chain_properties')
 
     def get_config(self):
@@ -1313,7 +1453,24 @@ class Api:
         return self.rpc.call('get_database_info')
 
     def get_dynamic_global_properties(self) -> Union[bool, dict]:
-
+        """
+        
+        :return dict dynamic_props: A dictionary containing the dynamic global properties (see below)
+        
+        .. code-block:: python
+        
+            dict(
+                id, head_block_number, head_block_id, time, current_witness, total_pow, num_pow_witnesses,
+                virtual_supply, current_supply, confidential_supply, current_sbd_supply, confidential_sbd_supply,
+                sbd_interest_rate, sbd_print_rate, average_block_size, maximum_block_size, current_aslot,
+                recent_slots_filled, participation_count, max_virtual_bandwidth, current_reserve_ratio,
+                custom_ops_bandwidth_multiplier, is_forced_min_price, transit_block_num, transit_witnesses,
+                total_vesting_fund_steem, total_reward_fund_steem, total_vesting_shares, total_reward_shares2,
+                last_irreversible_block_num, vote_regeneration_per_day, golos_per_vests, now
+            )
+        
+ 
+        """
         # Returns the global properties
         prop = self.rpc.call('get_dynamic_global_properties')
 

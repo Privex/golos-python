@@ -1,5 +1,5 @@
 doublesha256
-=========================
+============
 
 .. currentmodule:: golos.base58
 
