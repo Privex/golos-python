@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+import json
+import sys
+import os
+import inspect
+from datetime import datetime
+from decimal import Decimal
+
+from privex.helpers import ErrHelpParser, empty
+from golos import Api
+
+os.environ['PYTHON_PATH'] = os.getcwd()
+
+parser = ErrHelpParser()
+
+parser.add_argument('api_name', type=str)
+parser.add_argument('api_arguments', nargs='*', type=str, default=[])
+parser.add_argument('--nodes', default=None, dest='nodes')
+
+args = parser.parse_args()
+
+nodes = args.nodes
+if not empty(nodes):
+    golos = Api(nodes.split(','))
+else:
+    golos = Api()
+
+try:
+    call = getattr(golos, args.api_name)
+except (AttributeError, KeyError):
+    print(f"Invalid API call '{args.api_name}'")
+    print("Available API calls:")
+    print()
+    for a in golos.__class__.__dict__:
+        if a[0] == '_':
+            continue
+        if not callable(getattr(golos, a)):
+            continue
+        _func = getattr(golos, a)
+        print(f"\t - {a}   {str(inspect.signature(_func))}")
+    print()
+    sys.exit(1)
+
+
+def cast_json_str(j: dict):
+    new_dict = dict(j)
+    for k, v in j.items():
+        if isinstance(v, (datetime, Decimal,)):
+            new_dict[k] = str(v)
+        if isinstance(v, dict):
+            new_dict[k] = cast_json_str(new_dict[k])
+    return new_dict
+
+
+res = call(*args.api_arguments)
+
+if isinstance(res, list):
+    for i, _v in enumerate(list(res)):
+        if isinstance(_v, dict):
+            res[i] = cast_json_str(_v)
+elif isinstance(res, dict):
+    res = cast_json_str(res)
+
+print(json.dumps(res, indent=4))
+
+
+
+
+
+

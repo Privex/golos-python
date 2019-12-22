@@ -159,7 +159,7 @@ class GolosTestCase(unittest.TestCase):
             tx_orig = dict_sort(t['tx'])
             self.assertEqual(tx_bc, tx_orig, msg=f'(TX {i}) tx_bc == tx_orig')
 
-    def test_get_transaction_no_exit(self):
+    def test_get_transaction_no_exist(self):
         """Test Api.get_transaction raises TransactionNotFound with a non-existent TXID"""
         with self.assertRaises(exceptions.TransactionNotFound):
             self.golos.get_transaction('d901c52daf57b602abd9d7be67f790e023cf27fc')

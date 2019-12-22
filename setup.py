@@ -68,6 +68,7 @@ setup(
         'ecdsa>=0.13',
     ],
     packages=find_packages(),
+    scripts=['bin/golos_call'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.6",

@@ -46,6 +46,10 @@ class GolosException(Exception):
     pass
 
 
+class KnownGolosError(GolosException):
+    """Base class for "standard non-fatal errors" returned by the API, such as to indicate an account or transaction does not exist"""
+
+
 class APINotFound(GolosException):
     """Raised when an RPC node does not support the requested API"""
     pass
@@ -56,6 +60,6 @@ class RetriesExceeded(GolosException):
     pass
 
 
-class TransactionNotFound(GolosException):
+class TransactionNotFound(KnownGolosError):
     """Raised when a requested transaction could not be located"""
     pass

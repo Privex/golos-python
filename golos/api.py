@@ -52,9 +52,9 @@ from pprint import pprint
 from time import time
 from typing import Union, List, Tuple, Dict
 
-from privex.helpers import dec_round, r_cache
+from privex.helpers import dec_round, r_cache, retry_on_err
 
-from golos.extras import dict_sort
+from golos.extras import dict_sort, new_node_on_err
 from .exceptions import TransactionNotFound, GolosException
 from .broadcast import Tx
 from .key import Key
@@ -105,6 +105,9 @@ class Api:
     broadcast: Tx
     asset_precision: Dict[str, int]
     STEEMIT_BANDWIDTH_PRECISION: int
+    
+    MAX_RETRIES = 5
+    RETRY_DELAY = 1
     
     def __init__(self, nodes: Union[List[str], str] = None, **kwargs):
         """
@@ -172,6 +175,7 @@ class Api:
 
     @property
     @r_cache('golos:chain_props', cache_time=30)
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def chain_properties(self) -> dict:
         """
         This property loads and caches the chain properties for up to 30 seconds, avoiding constant
@@ -187,6 +191,7 @@ class Api:
 
     @property
     @r_cache('golos:dyn_glob_props', cache_time=30)
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def dynamic_global_properties(self) -> dict:
         """
         This property loads and caches the dynamic global properties for up to 30 seconds, avoiding constant
@@ -197,7 +202,7 @@ class Api:
         props = self.get_dynamic_global_properties()
         if not props:
             log.debug('error in global data')
-            raise GolosException('Error obtaining dynamic global props...')
+            raise GolosException('Error obtaining dynamic global props using RPC node {}...'.format(self.rpc.url))
         return props
     
     def get_transaction_hex(self, tx: dict, remove_sigs=False) -> str:
@@ -257,7 +262,8 @@ class Api:
         txhash = m.hexdigest()
         
         return txhash[:40]
-    
+
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY, fail_on=[KeyboardInterrupt, TransactionNotFound])
     def get_transaction(self, txid: str) -> dict:
         """
         Lookup the transaction ID ``txid`` and return it's matching transaction as a ``dict``
@@ -1028,6 +1034,7 @@ class Api:
 
         return round(base / quote, asset_precision["GBG"])
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_follow(self, account: str):
 
         follow = {"follower": [], "following": []}
@@ -1065,6 +1072,7 @@ class Api:
 
         return account_follow
 
+    @retry_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_account_reputations(self, account):
 
         # Определяем репутацию аккаунта
@@ -1108,8 +1116,9 @@ class Api:
     # ----- account_history ----- #
 
     # noinspection PyIncorrectDocstring
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_account_history(self, account: str, op_limit: Union[list, str] = 'all', **kwargs) -> List[dict]:
-        r"""
+        """
         Get the account history for a given ``account`` as a ``List[dict]``.
         
         Optionally you can filter the operations returned using ``op_limit``, as well as limit the number of operations
@@ -1129,14 +1138,11 @@ class Api:
         :param list op_limit: Only return operations of these types. Specify either as a list: ``['transfer', 'vote']``,
                               or as a string, e.g. ``'transfer'`` (only transfers) or ``'all'`` (no filter)
         
-        :param \**kwargs:
-            See below
+        :param kwargs: See below
 
-        :Keyword Arguments:
-            * *start_limit* (``int``) --
-              Load at most this many history items (Default: ``1000`` items)
-            * *age* (``int``) --
-              Skip history items older than this many seconds (Default: ``604800`` seconds / 7 days)
+        :key int start_limit: Load at most this many history items (Default: ``1000`` items)
+        :key int age: Skip history items older than this many seconds (Default: ``604800`` seconds / 7 days)
+        
         :return List[dict] history: A ``list`` of ``dict`` history ops (see below for format)
         
         .. code-block:: python
@@ -1213,7 +1219,8 @@ class Api:
         total_vests = Decimal(info['total_vesting_fund_steem'])
         total_shares = Decimal(info['total_vesting_shares'])
         return dec_round((total_vests * vests) / total_shares, dp=3, rounding=ROUND_DOWN)
-    
+
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_balances(self, *accounts) -> Dict[str, Dict[str, Decimal]]:
         """
         Get all balances for one or more ``accounts`` (as positional arguments).
@@ -1251,7 +1258,14 @@ class Api:
                 b[asset] = Decimal(a[akey])
         
         return res
-    
+
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
+    def _get_accounts(self, logins: List[str], **kwargs) -> List[dict]:
+        if type(logins) is str: logins = [logins]
+        
+        return self.rpc.call('get_accounts', logins)
+
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_accounts(self, logins: List[str], **kwargs) -> List[dict]:
         """
         Перерасчитываются некоторые параметры по аккаунту
@@ -1272,6 +1286,7 @@ class Api:
         "order" = {"GOLOS", "GBG"} - цена апвота по медиане
         "rating" = репутация в десятичном виде
         """
+        if type(logins) is str: logins = [logins]
 
         add_follow = kwargs.pop("follow", False)
 
@@ -1310,20 +1325,20 @@ class Api:
 
             vesting_shares = int(1e6 * account["golos_power"] / info["golos_per_vests"])
 
-            max_vote_denom = info["vote_regeneration_per_day"] * (5 * 60 * 60 * 24) / (60 * 60 * 24)
-            used_power = int((account["voting_power"] + max_vote_denom - 1) / max_vote_denom)
-            rshares = ((vesting_shares * used_power) / 10000)
-            account["rshares"] = round(rshares)
-            account["add_reputation"] = round(rshares / 64)
+            # max_vote_denom = info["vote_regeneration_per_day"] * (5 * 60 * 60 * 24) / (60 * 60 * 24)
+            # used_power = int((account["voting_power"] + max_vote_denom - 1) / max_vote_denom)
+            # rshares = ((vesting_shares * used_power) / 10000)
+            # account["rshares"] = round(rshares)
+            # account["add_reputation"] = round(rshares / 64)
 
             # Определение стоимости апвота
 
-            value_golos = round(account["rshares"] * info["total_reward_fund_steem"] / info["total_reward_shares2"],
-                                asset_precision["GOLOS"])
-            value_gbg = round(value_golos * median_price, asset_precision["GBG"])
-            order_gbg = round(value_golos * order_price, asset_precision["GBG"])
-            account["value"] = {"GOLOS": value_golos, "GBG": value_gbg}
-            account["order"] = {"GOLOS": value_golos, "GBG": order_gbg}
+            # value_golos = round(account["rshares"] * info["total_reward_fund_steem"] / info["total_reward_shares2"],
+            #                     asset_precision["GOLOS"])
+            # value_gbg = round(value_golos * median_price, asset_precision["GBG"])
+            # order_gbg = round(value_golos * order_price, asset_precision["GBG"])
+            # account["value"] = {"GOLOS": value_golos, "GBG": value_gbg}
+            # account["order"] = {"GOLOS": value_golos, "GBG": order_gbg}
 
             # Определение ликвидных токенов
 
@@ -1336,20 +1351,22 @@ class Api:
 
             account["new_post_time"] = 0  # minutes
             minutes_per_day = 24 * 60
-            last_post_time = datetime.strptime(account["last_root_post"], time_format)
-            age_after_post = (info["now"] - last_post_time).total_seconds() / 60  # minutes
-            if age_after_post >= minutes_per_day:
-                account["new_post_limit"] = 4
-            else:
-                new_post_bandwidth = int(
-                    (((minutes_per_day - age_after_post) / minutes_per_day) * account["post_bandwidth"]) + 10000)
-
-                if new_post_bandwidth > 40000:
-                    account["new_post_limit"] = 0
-                    account["new_post_time"] = round(
-                        minutes_per_day - ((40000 - 10000) / (new_post_bandwidth - 10000)) * minutes_per_day)
+            last_post_time = account.get("last_root_post")
+            if last_post_time is not None:
+                last_post_time = datetime.strptime(last_post_time, time_format)
+                age_after_post = (info["now"] - last_post_time).total_seconds() / 60  # minutes
+                if age_after_post >= minutes_per_day:
+                    account["new_post_limit"] = 4
                 else:
-                    account["new_post_limit"] = int(4 - (new_post_bandwidth // 10000))
+                    new_post_bandwidth = int(
+                        (((minutes_per_day - age_after_post) / minutes_per_day) * account["post_bandwidth"]) + 10000)
+    
+                    if new_post_bandwidth > 40000:
+                        account["new_post_limit"] = 0
+                        account["new_post_time"] = round(
+                            minutes_per_day - ((40000 - 10000) / (new_post_bandwidth - 10000)) * minutes_per_day)
+                    else:
+                        account["new_post_limit"] = int(4 - (new_post_bandwidth // 10000))
 
             # Определение update_account_bandwidth
 
@@ -1423,9 +1440,11 @@ class Api:
 
         return accounts
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_block(self, n):
         return self.rpc.call('get_block', str(n))
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_chain_properties(self) -> dict:
         """
 
@@ -1446,12 +1465,15 @@ class Api:
         """
         return self.rpc.call('get_chain_properties')
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_config(self):
         return self.rpc.call('get_config')
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_database_info(self):
         return self.rpc.call('get_database_info')
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_dynamic_global_properties(self) -> Union[bool, dict]:
         """
         
@@ -1476,16 +1498,14 @@ class Api:
 
         # Obtain STEEM/VESTS ratio
         for p in ["total_vesting_fund_steem", "total_reward_fund_steem", "total_vesting_shares"]:
-            try:
-                value = prop.pop(p, None)
-                prop[p] = float(value.split()[0])
-            except:
-                return False
+            value = prop.pop(p, None)
+            prop[p] = float(value.split()[0])
 
         for p in ["total_reward_shares2", "last_irreversible_block_num", "vote_regeneration_per_day"]:
             value = prop.pop(p, None)
             if not value:
-                return False
+                log.debug("WARNING: %s not found in props. Skipping. Props were: %s", p, prop)
+                continue
             prop[p] = int(value)
 
         prop["golos_per_vests"] = prop["total_vesting_fund_steem"] / prop["total_vesting_shares"]
@@ -1493,8 +1513,8 @@ class Api:
 
         return prop
 
+    @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_all_accounts(self):
-
         n = self.get_account_count()
         limit = 1000
         log.debug('find', n, 'accounts')

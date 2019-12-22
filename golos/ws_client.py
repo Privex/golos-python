@@ -39,18 +39,24 @@ Copyright::
 
 
 """
-from typing import Union, List
+import functools
+import random
+from typing import Union, List, Iterator, Optional
 
 import websocket
 import ssl
 import json
 import logging
+
+from privex.helpers import retry_on_err
+
 from golos import storage
+from golos.extras import new_node_on_err
 from .storage import api_total
 from time import sleep
 from pprint import pprint
 from itertools import cycle
-from .exceptions import GolosException, APINotFound, RetriesExceeded, TransactionNotFound
+from .exceptions import GolosException, APINotFound, RetriesExceeded, TransactionNotFound, KnownGolosError
 
 log = logging.getLogger(__name__)
 
@@ -137,11 +143,16 @@ class WsClient:
         >>> rpc.call('command', 'my_param1', 'other_param2')
     
     """
-    nodes: List[str]
+    nodes: Iterator[str]
     report: bool
     api_total: dict
     url: str
-    ws: websocket.WebSocket
+    ws: Optional[websocket.WebSocket]
+
+    MAX_RETRIES = 5
+    RETRY_DELAY = 1
+
+    sslopt_ca_certs = {'cert_reqs': ssl.CERT_NONE}
 
     def __init__(self, report=False, nodes: Union[List[str], str] = None, **kwargs):
         """
@@ -154,45 +165,39 @@ class WsClient:
         self.report = report
         self.num_retries = kwargs.get("num_retries", 20)
         nodes = [nodes] if type(nodes) is str else nodes
-        self.nodes = cycle(storage.nodes if nodes is None else nodes)  # Перебор нод
+        default_nodes = list(storage.nodes)
+        random.shuffle(default_nodes)
+        self.nodes = cycle(default_nodes if nodes is None else nodes)  # Перебор нод
         self.api_total = api_total
         self.url = ''
         self.ws = None
         self.ws_connect()  # Подключение к ноде
 
+    @retry_on_err(fail_on=[KeyboardInterrupt])
+    def next_node(self):
+        self.url = next(self.nodes)
+        self.node_connect(self.url)
+    
+    def node_connect(self, url: str = None):
+        if not url:
+            url = self.url
+        if self.report:
+            log.info("Trying to connect to node %s", url)
+            
+        self.ws = websocket.WebSocket(sslopt=self.sslopt_ca_certs) if self.url[:3] == "wss" else websocket.WebSocket()
+        self.ws.connect(url)
+        return True
+    
+    @retry_on_err(max_retries=10, fail_on=[KeyboardInterrupt])
     def ws_connect(self):
         """
         Attempt to connect to a working GOLOS WebSockets node.
-        
-        :raises RetriesExceeded: When too many failures occurred while re-trying WS connection.
         """
-        cnt = 0
-        while True:
-            cnt += 1
-            self.url = next(self.nodes)
-            if self.report:
-                log.info("Trying to connect to node %s", self.url)
-            if self.url[:3] == "wss":
-                sslopt_ca_certs = {'cert_reqs': ssl.CERT_NONE}
-                self.ws = websocket.WebSocket(sslopt=sslopt_ca_certs)
-            else:
-                self.ws = websocket.WebSocket()
+        self.url = next(self.nodes)
+        self.node_connect(self.url)
 
-            try:
-                self.ws.connect(self.url)
-                break
-            except KeyboardInterrupt:
-                raise
-            except:
-                if 0 <= self.num_retries < cnt:
-                    raise RetriesExceeded(f"Failed connecting to a working websockets node after {cnt} tries...")
-
-                sleeptime = (cnt - 1) * 2 if cnt < 10 else 10
-                if sleeptime:
-                    log.info("Lost connection to node during wsconnect(): %s (%d/%d) ", self.url, cnt, self.num_retries)
-                    log.info("Retrying in %d seconds", sleeptime)
-                    sleep(sleeptime)
-
+    # @new_node_on_err(max_retries=MAX_RETRIES, delay=RETRY_DELAY, fail_on=[KeyboardInterrupt])
+    @retry_on_err(max_retries=2, delay=1, fail_on=[KeyboardInterrupt, KnownGolosError, TransactionNotFound])
     def call(self, name, *args) -> Union[dict, list, bool]:
         """
         Make a JsonRPC call to the current working WS node.
@@ -218,10 +223,9 @@ class WsClient:
         else:
             if self.report:
                 log.warning('not find api in api_total')
-            return False
+            raise GolosException("API not found...")
 
         response, result = None, []
-
         cnt = 0
         while True:
             cnt += 1
@@ -232,7 +236,7 @@ class WsClient:
                 # pprint(response)
                 break
             except KeyboardInterrupt:
-                raise
+                raise KeyboardInterrupt
             except:
                 if -1 < self.num_retries < cnt:  # возможно сделать return False
                     raise RetriesExceeded(f"Failed to make call '{name}' after {cnt} tries...")
@@ -253,7 +257,8 @@ class WsClient:
         if not response:
             if self.report:
                 log.error('not response')
-            return False
+            raise GolosException("No response...")
+
         rj = response_json = json.loads(response)  # Нет проверки на ошибки при загрузке данных
 
         if 'error' in response_json:
@@ -261,7 +266,7 @@ class WsClient:
         if 'result' not in response_json:
             if self.report:
                 log.error("No 'result' key found in response...")
-            return False
+            raise GolosException("No 'result' key found in response...")
 
         return response_json.get("result")
 
